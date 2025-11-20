@@ -1,5 +1,6 @@
 <script>
 import LoadingState from 'dashboard/components/widgets/LoadingState.vue';
+import CryptoJS from 'crypto-js';
 
 export default {
   components: {
@@ -27,6 +28,7 @@ export default {
     return {
       hasOpenedAtleastOnce: false,
       iframeLoading: true,
+      signedConfig: [],
     };
   },
   computed: {
@@ -51,6 +53,20 @@ export default {
         this.hasOpenedAtleastOnce = true;
       }
     },
+    config: {
+      immediate: true,
+      deep: true,
+      handler(newConfig) {
+        this.signedConfig = newConfig.map(item => {
+          if (!item.url) return item;
+          const signed = this.generateSignedUrl(item.url);
+          return {
+            ...item,
+            signed_url: signed,
+          };
+        });
+      },
+    },
   },
   mounted() {
     window.addEventListener('message', this.triggerEvent);
@@ -59,6 +75,30 @@ export default {
     window.removeEventListener('message', this.triggerEvent);
   },
   methods: {
+    generateSignedUrl(url) {
+      const secret = import.meta.env.VITE_DASHBOARD_APP_SECRET || '';
+      if (!secret) return url;
+      const payload = {
+        user_id: this.currentAgent.id,
+        email: this.currentAgent.email,
+        name: this.currentAgent.name,
+        role: this.currentAgent.role,
+        account_id: this.$store.getters.getCurrentAccountId,
+        exp: Math.floor(Date.now() / 1000) + 1800, // +30 minutes lifetime
+      };
+      const payloadJson = JSON.stringify(payload);
+      const payloadB64 = btoa(unescape(encodeURIComponent(payloadJson)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+      const signature = CryptoJS.HmacSHA256(payloadB64, secret).toString(
+        CryptoJS.enc.Hex
+      );
+      const signedurl = new URL(url);
+      signedurl.searchParams.set('cw_payload', payloadB64);
+      signedurl.searchParams.set('cw_sig', signature);
+      return signedurl.toString();
+    },
     triggerEvent(event) {
       if (!this.isVisible) return;
       if (event.data === 'chatwoot-dashboard-app:fetch-info') {
@@ -73,8 +113,13 @@ export default {
       // However, when ref is used together with v-for, the ref you get will be
       // an array containing the child components mirroring the data source.
       const frameElement = document.getElementById(this.getFrameId(index));
-      const eventData = { event: 'appContext', data: this.dashboardAppContext };
-      frameElement.contentWindow.postMessage(JSON.stringify(eventData), '*');
+      if (frameElement) {
+        const eventData = {
+          event: 'appContext',
+          data: this.dashboardAppContext,
+        };
+        frameElement.contentWindow.postMessage(JSON.stringify(eventData), '*');
+      }
       this.iframeLoading = false;
     },
   },
@@ -85,7 +130,7 @@ export default {
 <template>
   <div v-if="hasOpenedAtleastOnce" class="dashboard-app--container">
     <div
-      v-for="(configItem, index) in config"
+      v-for="(configItem, index) in signedConfig"
       :key="index"
       class="dashboard-app--list"
     >
@@ -95,9 +140,12 @@ export default {
         class="dashboard-app_loading-container"
       />
       <iframe
-        v-if="configItem.type === 'frame' && configItem.url"
+        v-if="
+          configItem.type === 'frame' &&
+          (configItem.signed_url || configItem.url)
+        "
         :id="getFrameId(index)"
-        :src="configItem.url"
+        :src="configItem.signed_url || configItem.url"
         @load="() => onIframeLoad(index)"
       />
     </div>
@@ -111,7 +159,6 @@ export default {
   height: 100%;
   width: 100%;
 }
-
 .dashboard-app--list iframe {
   border: 0;
 }
