@@ -185,7 +185,7 @@ class Conversation < ApplicationRecord
 
   # Virtual attribute till we switch completely to polymorphic assignee
   def assignee_type
-    return 'AgentBot' if assignee_agent_bot_id.present?
+    # return 'AgentBot' if assignee_agent_bot_id.present?
     return 'User' if assignee_id.present?
 
     nil
@@ -244,7 +244,7 @@ class Conversation < ApplicationRecord
   def reset_agent_bot_when_assignee_present
     return if assignee_id.blank?
 
-    self.assignee_agent_bot_id = nil
+    # self.assignee_agent_bot_id = nil
   end
 
   def determine_conversation_status
